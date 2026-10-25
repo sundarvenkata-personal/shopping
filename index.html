@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#2e7d32">
+<title>Shopping</title>
+<style>
+  :root{--g:#2e7d32;--bg:#f6f7f4}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+  body{margin:0;font:17px system-ui,sans-serif;background:var(--bg);padding-bottom:90px}
+  h2{margin:18px 14px 6px;font-size:15px;text-transform:uppercase;letter-spacing:.06em;color:#555}
+  .grid{display:flex;flex-wrap:wrap;gap:8px;padding:0 12px}
+  .chip{display:flex;align-items:center;gap:8px;padding:11px 15px;border-radius:22px;background:#fff;
+        border:1px solid #d5d8d0;user-select:none;-webkit-user-select:none}
+  .chip.on{background:var(--g);color:#fff;border-color:var(--g)}
+  .qty{font-weight:700;background:#fff;color:var(--g);border-radius:12px;min-width:24px;text-align:center;padding:1px 7px}
+  .minus{background:rgba(255,255,255,.25);color:#fff;border-radius:50%;width:26px;height:26px;
+         display:flex;align-items:center;justify-content:center;font-weight:700}
+  .add{display:flex;gap:8px;padding:16px 12px}
+  .add input{flex:1;padding:12px;font-size:17px;border:1px solid #ccc;border-radius:10px}
+  button{font-size:17px;border:0;border-radius:10px;padding:12px 16px}
+  .bar{position:fixed;left:0;right:0;bottom:0;padding:12px 12px calc(12px + env(safe-area-inset-bottom));
+       background:#fff;border-top:1px solid #ddd;display:flex;gap:8px}
+  #send{flex:1;background:var(--g);color:#fff;font-weight:600}
+  #clear{background:#eee}
+  #send:disabled{opacity:.4}
+  #note{padding:8px 14px;color:#8a5a00;font-size:14px}
+</style>
+</head>
+<body>
+<div id="note"></div>
+<div id="app"></div>
+<div class="add">
+  <input id="newItem" placeholder="Add an item…" enterkeyhint="done">
+  <button id="addBtn">Add</button>
+</div>
+<div class="bar">
+  <button id="clear">Clear</button>
+  <button id="send" disabled>Send list (0)</button>
+</div>
+
+<script>
+const CATALOG = {
+  "Fruit & Veg": ["fruits","garlic","ginger","coriander","mushrooms","spinach","tomatoes","cucumber","cabbage","cauliflower","beans","onions","potatoes","carrots","aubergine"],
+  "Dairy & Bakery": ["bread","eggs","milk","unsalted butter","spreadable butter","panneer","shredded cheese"],
+  "Pantry": ["chickpeas","maggi"],
+  "Nuts & Snacks": ["monkey nuts","almonds","cashews","pistachios","crisps","belvita"],
+  "Frozen": ["gyozas","frozen vegetable","frozen pea"],
+  "Drinks": ["smoothie","orange juice","sparkling water"],
+  "Household": ["floor wipes","general purpose wipes","laundry detergent","fabric softener","mouthwash"]
+};
+
+const KEY = "shop.v3";
+const $ = id => document.getElementById(id);
+const state = Object.assign({qty:{}, custom:[], lastId:""}, JSON.parse(localStorage.getItem(KEY) || "{}"));
+const save = () => localStorage.setItem(KEY, JSON.stringify(state));
+
+const enc = o => btoa(unescape(encodeURIComponent(JSON.stringify(o)))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+const dec = s => JSON.parse(decodeURIComponent(escape(atob(s.replace(/-/g,"+").replace(/_/g,"/")))));
+
+// Import a list from the URL hash (#l=...), once per unique id, then clean the URL
+(function importFromHash(){
+  const m = location.hash.match(/[#&]l=([^&]+)/);
+  if (!m) return;
+  try {
+    const d = dec(m[1]);
+    if (d.id && d.id !== state.lastId) {
+      state.qty = d.q || {};
+      (d.c || []).forEach(c => { if (!state.custom.includes(c)) state.custom.push(c); });
+      state.lastId = d.id;
+      save();
+      $("note").textContent = "Loaded the list you were sent. Add anything, then send it back.";
+    }
+  } catch(e) { $("note").textContent = "Could not read that shared list."; }
+  history.replaceState(null, "", location.pathname + location.search);
+})();
+
+function catalog(){
+  const c = {...CATALOG};
+  if (state.custom.length) c["Added"] = state.custom;
+  return c;
+}
+
+function render(){
+  const app = $("app"); app.innerHTML = "";
+  for (const [cat, items] of Object.entries(catalog())){
+    const h = document.createElement("h2"); h.textContent = cat; app.append(h);
+    const g = document.createElement("div"); g.className = "grid";
+    items.forEach(it => {
+      const q = state.qty[it] || 0;
+      const d = document.createElement("div");
+      d.className = "chip" + (q ? " on" : "");
+      d.append(it);
+      if (q) {
+        const b = document.createElement("span"); b.className = "qty"; b.textContent = q; d.append(b);
+        const m = document.createElement("span"); m.className = "minus"; m.textContent = "−";
+        m.onclick = e => { e.stopPropagation(); change(it,-1); };
+        d.append(m);
+      }
+      d.onclick = () => change(it,+1);
+      g.append(d);
+    });
+    app.append(g);
+  }
+  const n = Object.keys(state.qty).length;
+  $("send").textContent = `Send list (${n})`;
+  $("send").disabled = n === 0;
+}
+
+function change(it, delta){
+  const q = Math.max(0, (state.qty[it] || 0) + delta);
+  q ? state.qty[it] = q : delete state.qty[it];
+  if (navigator.vibrate) navigator.vibrate(10);
+  save(); render();
+}
+
+function addItem(){
+  const v = $("newItem").value.trim();
+  if (!v) return;
+  const match = Object.values(catalog()).flat().find(x => x.toLowerCase() === v.toLowerCase());
+  const name = match || v;
+  if (!match) state.custom.push(name);
+  state.qty[name] = (state.qty[name] || 0) + 1;
+  $("newItem").value = ""; save(); render();
+}
+
+function summary(){
+  const lines = ["🛒 Shopping list"];
+  for (const [cat, items] of Object.entries(catalog())){
+    const hit = items.filter(i => state.qty[i]);
+    if (hit.length) lines.push("", cat + ":", ...hit.map(i => "• " + i + (state.qty[i] > 1 ? " x" + state.qty[i] : "")));
+  }
+  return lines.join("\n");
+}
+
+function shareLink(){
+  const id = Date.now().toString(36);
+  return location.origin + location.pathname + "#l=" + enc({id, q: state.qty, c: state.custom});
+}
+
+async function send(){
+  const text = summary() + "\n\nOpen & edit: " + shareLink();
+  try {
+    if (navigator.share) await navigator.share({text});
+    else { await navigator.clipboard.writeText(text); alert("Copied. Paste it into a message."); }
+  } catch(e) {}
+}
+
+$("addBtn").onclick = addItem;
+$("newItem").onkeydown = e => e.key === "Enter" && addItem();
+$("send").onclick = send;
+$("clear").onclick = () => { if (confirm("Reset all quantities?")) { state.qty = {}; save(); render(); } };
+render();
+</script>
+</body>
+</html>
